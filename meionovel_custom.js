@@ -5,7 +5,7 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.2.0";
+    this.version = "1.2.1";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
@@ -297,19 +297,9 @@ class MeioNovelCustom {
 
     // Ekstraksi Penulis (Author)
     let author = "";
-    const authorPatterns = [
-      /(?:Penulis|Author|Pengarang)\s*:?\s*(?:<[^>]+>\s*)*([^<\n\r]+)/i,
-      /<a[^>]+href=["'][^"']*(?:penulis|author)=[^"']+["'][^>]*>([\s\S]*?)<\/a>/i,
-    ];
-    for (const pat of authorPatterns) {
-      const am = body.match(pat);
-      if (am && am[1]) {
-        const cleanedAuthor = this._decodeEntities(am[1].replace(/<[^>]+>/g, "")).trim();
-        if (cleanedAuthor && cleanedAuthor.length < 80) {
-          author = cleanedAuthor;
-          break;
-        }
-      }
+    const authorMatch = body.match(/<a[^>]+href=["'][^"']*\/novel-author\/[^"']+["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (authorMatch && authorMatch[1]) {
+      author = this._decodeEntities(authorMatch[1].replace(/<[^>]+>/g, "")).trim();
     }
 
     // Ekstraksi Genre
