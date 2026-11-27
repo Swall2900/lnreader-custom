@@ -387,11 +387,11 @@ class MeioNovelCustom {
       if (!isNovelChapter) continue;
       if (seen.has(cleanHref)) continue;
       let rawTitle = decodeAll(String(m[2] || "").replace(/<[^>]+>/g, " "));
-      if (/^(mulai baca|start reading|baca sekarang|read now)$/i.test(rawTitle)) continue;
-      rawTitle = rawTitle.replace(/^\s*[▶►▸•·\-]+\s*/, "").trim();
+      rawTitle = rawTitle.replace(/^[\s▶►▸•·\-]+/, "").trim();
+      if (/^(mulai baca|start reading|baca sekarang|read now)(\b|\s|[—–\-:])/i.test(rawTitle)) continue;
       rawTitle = rawTitle.replace(/\s*(terakhir dibaca|last read).*$/i, "").trim();
-      rawTitle = rawTitle.replace(/\s*\b\d{1,2}\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{4}\b.*$/i, "").trim();
-      rawTitle = rawTitle.replace(/\s*\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s+\d{1,2}\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{4}.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{1,2},?\s+\d{4}.*$/i, "").trim();
       seen.add(cleanHref);
       const slugTitle = parts[parts.length - 1] ? parts[parts.length - 1].replace(/-/g, " ") : "Chapter";
       const name = rawTitle || slugTitle;
