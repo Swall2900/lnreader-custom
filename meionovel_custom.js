@@ -374,15 +374,17 @@ class MeioNovelCustom {
       const rawHref = this._decodeEntities(String(m[1] || "")).trim();
       if (!rawHref) continue;
       let cleanHref = rawHref.replace(/^https?:\/\/[^/]+/i, "");
-      if (!cleanHref.startsWith("/")) cleanHref = "/" + cleanHref;
-      cleanHref = cleanHref.replace(/^\/+/, "");
-      if (!cleanHref || /^(novel|jelajahi|genre|kategori|tag|ranking|library|pengumuman|login|register)(\/|$)/i.test(cleanHref)) continue;
-      if (!/(\/baca\/|\/chapter\/|\/bab\/|chapter-|bab-|ch-)/i.test(cleanHref)) continue;
+      cleanHref = cleanHref.replace(/^\/+|\/+$/g, "");
+      if (!cleanHref) continue;
+      const parts = cleanHref.split("/").filter(Boolean);
+      const isNovelChapter = parts.length >= 3 && parts[0].toLowerCase() === "novel" && (!slug || parts[1] === slug);
+      const isReaderPath = /^(\/?)(baca|chapter|bab)\//i.test(cleanHref);
+      if (!isNovelChapter && !isReaderPath) continue;
       if (seen.has(cleanHref)) continue;
       seen.add(cleanHref);
       const rawTitle = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-      const fallbackNum = cleanHref.match(/(\d+)(?!.*\d)/);
-      const name = rawTitle || (fallbackNum ? "Chapter " + fallbackNum[1] : "Chapter");
+      const slugTitle = parts[parts.length - 1] ? parts[parts.length - 1].replace(/-/g, " ") : "Chapter";
+      const name = rawTitle || slugTitle;
       chapters.push({
         name,
         path: cleanHref,
