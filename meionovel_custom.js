@@ -289,14 +289,100 @@ class MeioNovelCustom {
       if (firstHtml) {
         this._parseChaptersFromHtml(firstHtml, slug, seen, novel.chapters);
 
-        // Deteksi parameter jalur/tab (misal Web Novel / Light Novel)
         const jalurMatches = [...firstHtml.matchAll(/[?&]jalur=([^"'&\s#]+)/gi)].map((x) =>
           decodeURIComponent(x[1])
         );
         const uniqueJalurs = [...new Set(jalurMatches)];
 
-        // Deteksi jumlah halaman pagination (?page=2, ?page=3, ...)
         let maxPage = 1;
         const pageMatches = firstHtml.matchAll(/[?&]page=(\d+)/gi);
         for (const pm of pageMatches) {
           const pNum = Number(pm[1]);
+          if (pNum > maxPage && pNum <= 100) maxPage = pNum;
+        }
+
+        for (let p = 2; p <= maxPage; p++) {
+          const pageRes = await this._postJson(
+            listUrl,
+            { novel: novelId, token, params: { page: String(p) } },
+            csrf,
+            cookie,
+            url
+          );
+          const pHtml = pageRes.data && pageRes.data.html ? String(pageRes.data.html) : "";
+          if (!pHtml) break;
+          const added = this._parseChaptersFromHtml(pHtml, slug, seen, novel.chapters);
+          if (added === 0) break;
+        }
+
+        for (const jVal of uniqueJalurs) {
+          const jRes = await this._postJson(
+            listUrl,
+            { novel: novelId, token, params: { jalur: jVal } },
+            csrf,
+            cookie,
+            url
+          );
+          const jHtml = jRes.data && jRes.data.html ? String(jRes.data.html) : "";
+          if (jHtml) {
+            this._parseChaptersFromHtml(jHtml, slug, seen, novel.chapters);
+          }
+        }
+      }
+    }
+
+    if (novel.chapters.length === 0) {
+      this._parseChaptersFromHtml(body, slug, seen, novel.chapters);
+    }
+
+    return novel;
+  }
+
+  async parseChapter(chapterPath) {
+    const cleanPath = chapterPath.replace(/^\/+/, "");
+    const url = this.site + cleanPath;
+    const result = await fetch(url);
+    const body = await result.text();
+    const { csrf, cookie } = this._extractSession(result, body);
+
+    const readerIdx = body.indexOf("reader(");
+    const readerBlock = readerIdx !== -1 ? body.slice(readerIdx, readerIdx + 2500) : body;
+
+    const contentUrl = this._extractBlockField(readerBlock, "contentUrl") || `${this.site}baca/isi`;
+    const contentToken = this._extractBlockField(readerBlock, "contentToken");
+    const chapterId = Number(this._extractBlockField(readerBlock, "chapterId")) || null;
+
+    if (contentToken) {
+      const apiRes = await this._postJson(
+        contentUrl,
+        { chapter: chapterId, token: contentToken },
+        csrf,
+        cookie,
+        url
+      );
+
+      const d = apiRes.data || {};
+      if (d.k && Array.isArray(d.p)) {
+        const decodedHtml = this._decodeChapterPayload(d);
+        if (decodedHtml && decodedHtml.trim().length > 10) {
+          return decodedHtml;
+        }
+      }
+      if (d.html) return String(d.html);
+      if (d.content) return String(d.content);
+
+      return `<p>Gagal mendekode isi chapter (HTTP ${apiRes.status}).</p>`;
+    }
+
+    return "<p>Token chapter tidak ditemukan di halaman.</p>";
+  }
+
+  async searchNovels(searchTerm) {
+    const url = `${this.site}jelajahi?q=${encodeURIComponent(searchTerm)}`;
+    const result = await fetch(url);
+    const body = await result.text();
+    return this._extractNovels(body);
+  }
+}
+
+exports.default = new MeioNovelCustom();
