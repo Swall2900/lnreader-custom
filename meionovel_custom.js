@@ -5,7 +5,7 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.1.1";
+    this.version = "1.2.0";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
@@ -16,6 +16,8 @@ class MeioNovelCustom {
       .replace(/&quot;/g, '"')
       .replace(/&#039;|&apos;/g, "'")
       .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
       .replace(/\\+\//g, "/");
   }
 
@@ -167,10 +169,13 @@ class MeioNovelCustom {
     const seen = new Set();
 
     const coverMap = {};
-    const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]+alt=["']Cover\s+([^"']+)["']/gi;
+    const imgRegex = /<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]+alt=["'](?:Cover\s+)?([^"']+)["']/gi;
     let imgMatch;
     while ((imgMatch = imgRegex.exec(body)) !== null) {
-      coverMap[imgMatch[2].trim().toLowerCase()] = imgMatch[1];
+      const altKey = this._decodeEntities(imgMatch[2]).trim().toLowerCase();
+      if (altKey && !imgMatch[1].startsWith("data:")) {
+        coverMap[altKey] = imgMatch[1];
+      }
     }
 
     const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/([^\/"']+)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -178,7 +183,10 @@ class MeioNovelCustom {
 
     while ((match = linkRegex.exec(body)) !== null) {
       const novelUrl = match[1].endsWith("/") ? match[1] : match[1] + "/";
-      const cleanText = match[3].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const innerHtml = match[3];
+      const cleanText = this._decodeEntities(innerHtml.replace(/<[^>]+>/g, " "))
+        .replace(/\s+/g, " ")
+        .trim();
 
       if (
         cleanText &&
@@ -187,9 +195,25 @@ class MeioNovelCustom {
         !seen.has(novelUrl)
       ) {
         seen.add(novelUrl);
+
+        let cover = coverMap[cleanText.toLowerCase()] || "";
+        if (!cover) {
+          const innerImg = innerHtml.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/i);
+          if (innerImg && !innerImg[1].startsWith("data:")) {
+            cover = innerImg[1];
+          }
+        }
+        if (!cover) {
+          const beforeSnippet = body.slice(Math.max(0, match.index - 900), match.index);
+          const prevImgs = [...beforeSnippet.matchAll(/<img[^>]+(?:src|data-src)=["'](https?:\/\/[^"']+)["']/gi)];
+          if (prevImgs.length > 0) {
+            cover = prevImgs[prevImgs.length - 1][1];
+          }
+        }
+
         novels.push({
           name: cleanText,
-          cover: coverMap[cleanText.toLowerCase()] || "",
+          cover,
           path: novelUrl.replace(this.site, ""),
         });
       }
@@ -204,17 +228,32 @@ class MeioNovelCustom {
     while ((m = linkRegex.exec(html)) !== null) {
       const linkUrl = m[1];
       if (linkUrl.startsWith(`${this.site}novel/${slug}/`) && linkUrl !== `${this.site}novel/${slug}/`) {
-        const chapName = m[2]
-          .replace(/<[^>]+>/g, " ")
+        const rawInner = m[2];
+        let releaseTime = "";
+        const dateMatch = rawInner.match(
+          /\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|Mei|May|Jun|Jul|Agu|Aug|Sep|Okt|Oct|Nov|Des|Dec)[a-z]*\s+\d{4})\b/i
+        );
+        if (dateMatch) {
+          releaseTime = dateMatch[1];
+        }
+
+        let chapName = this._decodeEntities(rawInner.replace(/<[^>]+>/g, " "))
           .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
           .replace(/\s+/g, " ")
           .trim();
+
+        if (releaseTime) {
+          chapName = chapName.replace(releaseTime, "").replace(/\s*[•|-]\s*$/, "").trim();
+        }
+
         if (chapName && !seen.has(linkUrl)) {
           seen.add(linkUrl);
-          targetList.push({
+          const item = {
             name: chapName,
             path: linkUrl.replace(this.site, ""),
-          });
+          };
+          if (releaseTime) item.releaseTime = releaseTime;
+          targetList.push(item);
           added++;
         }
       }
@@ -223,12 +262,13 @@ class MeioNovelCustom {
   }
 
   async popularNovels(pageNo) {
-    const url = pageNo > 1 ? `${this.site}jelajahi?page=${pageNo}` : `${this.site}jelajahi`;
+    const page = pageNo || 1;
+    const url = page > 1 ? `${this.site}jelajahi?page=${page}` : `${this.site}jelajahi`;
     const result = await fetch(url);
     const body = await result.text();
     let novels = this._extractNovels(body);
 
-    if (novels.length === 0) {
+    if (novels.length === 0 && page === 1) {
       const homeRes = await fetch(this.site);
       const homeBody = await homeRes.text();
       novels = this._extractNovels(homeBody);
@@ -244,20 +284,64 @@ class MeioNovelCustom {
     const { csrf, cookie } = this._extractSession(result, body);
 
     const titleMatch = body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-    const name = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Untitled";
+    const name = titleMatch
+      ? this._decodeEntities(titleMatch[1].replace(/<[^>]+>/g, "")).trim()
+      : "Untitled";
 
     const ogImgMatch = body.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
     const coverMatch = body.match(/<img[^>]+src=["'](https:\/\/meionovels\.com\/wp-content\/uploads\/[^"']+)["']/i);
-    const cover = ogImgMatch ? ogImgMatch[1] : (coverMatch ? coverMatch[1] : "");
+    const cover = ogImgMatch ? ogImgMatch[1] : coverMatch ? coverMatch[1] : "";
 
     const descMatch = body.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
-    const summary = descMatch ? descMatch[1].trim() : "";
+    const summary = descMatch ? this._decodeEntities(descMatch[1]).trim() : "";
+
+    // Ekstraksi Penulis (Author)
+    let author = "";
+    const authorPatterns = [
+      /(?:Penulis|Author|Pengarang)\s*:?\s*(?:<[^>]+>\s*)*([^<\n\r]+)/i,
+      /<a[^>]+href=["'][^"']*(?:penulis|author)=[^"']+["'][^>]*>([\s\S]*?)<\/a>/i,
+    ];
+    for (const pat of authorPatterns) {
+      const am = body.match(pat);
+      if (am && am[1]) {
+        const cleanedAuthor = this._decodeEntities(am[1].replace(/<[^>]+>/g, "")).trim();
+        if (cleanedAuthor && cleanedAuthor.length < 80) {
+          author = cleanedAuthor;
+          break;
+        }
+      }
+    }
+
+    // Ekstraksi Genre
+    const genreSet = new Set();
+    const genreRegex = /<a[^>]+href=["'][^"']*(?:genre|tag|kategori)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let gm;
+    while ((gm = genreRegex.exec(body)) !== null) {
+      const gText = this._decodeEntities(gm[1].replace(/<[^>]+>/g, "")).trim();
+      if (gText && gText.length > 1 && gText.length < 35 && !/^(jelajahi|semua|novel)$/i.test(gText)) {
+        genreSet.add(gText);
+      }
+    }
+    const genres = [...genreSet].join(", ");
+
+    // Ekstraksi Status Novel
+    let status = "Unknown";
+    if (/\b(?:Tamat|Selesai|Completed)\b/i.test(body)) {
+      status = "Completed";
+    } else if (/\b(?:Berjalan|Ongoing)\b/i.test(body)) {
+      status = "Ongoing";
+    } else if (/\b(?:Hiatus|Ditunda)\b/i.test(body)) {
+      status = "On Hiatus";
+    }
 
     const novel = {
       path: cleanPath,
       name,
       cover,
       summary,
+      author,
+      genres,
+      status,
       chapters: [],
     };
 
@@ -377,10 +461,21 @@ class MeioNovelCustom {
     return "<p>Token chapter tidak ditemukan di halaman.</p>";
   }
 
-  async searchNovels(searchTerm, pageNo) { if (pageNo && pageNo > 1) return [];
-    const url = `${this.site}jelajahi?q=${encodeURIComponent(searchTerm)}`;
+  async searchNovels(searchTerm, pageNo) {
+    const page = pageNo || 1;
+    const url =
+      page > 1
+        ? `${this.site}jelajahi?q=${encodeURIComponent(searchTerm)}&page=${page}`
+        : `${this.site}jelajahi?q=${encodeURIComponent(searchTerm)}`;
     const result = await fetch(url);
     const body = await result.text();
+
+    if (page > 1) {
+      const pageRegex = new RegExp(`[?&]page=${page}\\b`, "i");
+      const hasNextPage = pageRegex.test(body) || /Berikutnya|Selanjutnya|&raquo;/i.test(body);
+      if (!hasNextPage && page > 2) return [];
+    }
+
     return this._extractNovels(body);
   }
 }
