@@ -368,31 +368,25 @@ class MeioNovelCustom {
   _parseChaptersFromHtml(html, slug, seen, chapters) {
     if (!html || !Array.isArray(chapters)) return 0;
     let added = 0;
-    const decodeAll = (str) => {
-      let s = this._decodeEntities(String(str || ""));
-      s = s.replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-      s = s.replace(/&#([0-9]+);/g, (_, d) => String.fromCharCode(Number(d)));
-      return s.replace(/[\u200B-\u200D\uFE0E\uFE0F]/g, "").replace(/\s+/g, " ").trim();
-    };
     const linkRegex = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = linkRegex.exec(html)) !== null) {
-      const rawHref = decodeAll(m[1]);
+      const rawHref = this._decodeEntities(String(m[1] || "")).trim();
       if (!rawHref) continue;
       let cleanHref = rawHref.replace(/^https?:\/\/[^/]+/i, "");
       cleanHref = cleanHref.replace(/^\/+|\/+$/g, "");
       if (!cleanHref) continue;
       const parts = cleanHref.split("/").filter(Boolean);
       const isNovelChapter = parts.length >= 3 && parts[0].toLowerCase() === "novel" && (!slug || parts[1] === slug);
-      if (!isNovelChapter) continue;
+      const isReaderPath = /^(\/?)(baca|chapter|bab)\//i.test(cleanHref);
+      if (!isNovelChapter && !isReaderPath) continue;
       if (seen.has(cleanHref)) continue;
-      let rawTitle = decodeAll(String(m[2] || "").replace(/<[^>]+>/g, " "));
-      rawTitle = rawTitle.replace(/^[\s▶►▸•·\-]+/, "").trim();
-      if (/^(mulai baca|start reading|baca sekarang|read now)(\b|\s|[—–\-:])/i.test(rawTitle)) continue;
-      rawTitle = rawTitle.replace(/\s*(terakhir dibaca|last read).*$/i, "").trim();
-      rawTitle = rawTitle.replace(/\s+\d{1,2}\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{4}.*$/i, "").trim();
-      rawTitle = rawTitle.replace(/\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{1,2},?\s+\d{4}.*$/i, "").trim();
       seen.add(cleanHref);
+      let rawTitle = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+      rawTitle = rawTitle.replace(/\s*(terakhir dibaca|last read).*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b\d{1,2}\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{4}\b.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b.*$/i, "").trim();
       const slugTitle = parts[parts.length - 1] ? parts[parts.length - 1].replace(/-/g, " ") : "Chapter";
       const name = rawTitle || slugTitle;
       chapters.push({
