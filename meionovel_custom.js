@@ -368,42 +368,37 @@ class MeioNovelCustom {
   _parseChaptersFromHtml(html, slug, seen, chapters) {
     if (!html || !Array.isArray(chapters)) return 0;
     let added = 0;
-    const months = { jan:0, feb:1, mar:2, apr:3, mei:4, may:4, jun:5, jul:6, agu:7, aug:7, sep:8, okt:9, oct:9, nov:10, des:11, dec:11 };
+    const decodeAll = (str) => {
+      let s = this._decodeEntities(String(str || ""));
+      s = s.replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+      s = s.replace(/&#([0-9]+);/g, (_, d) => String.fromCharCode(Number(d)));
+      return s.replace(/[\u200B-\u200D\uFE0E\uFE0F]/g, "").replace(/\s+/g, " ").trim();
+    };
     const linkRegex = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = linkRegex.exec(html)) !== null) {
-      const rawHref = this._decodeEntities(String(m[1] || "")).trim();
+      const rawHref = decodeAll(m[1]);
       if (!rawHref) continue;
       let cleanHref = rawHref.replace(/^https?:\/\/[^/]+/i, "");
       cleanHref = cleanHref.replace(/^\/+|\/+$/g, "");
       if (!cleanHref) continue;
       const parts = cleanHref.split("/").filter(Boolean);
       const isNovelChapter = parts.length >= 3 && parts[0].toLowerCase() === "novel" && (!slug || parts[1] === slug);
-      const isReaderPath = /^(\/?)(baca|chapter|bab)\//i.test(cleanHref);
-      if (!isNovelChapter && !isReaderPath) continue;
+      if (!isNovelChapter) continue;
       if (seen.has(cleanHref)) continue;
+      let rawTitle = decodeAll(String(m[2] || "").replace(/<[^>]+>/g, " "));
+      if (/^(mulai baca|start reading|baca sekarang|read now)$/i.test(rawTitle)) continue;
+      rawTitle = rawTitle.replace(/^\s*[▶►▸•·\-]+\s*/, "").trim();
+      rawTitle = rawTitle.replace(/\s*(terakhir dibaca|last read).*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b\d{1,2}\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{4}\b.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b.*$/i, "").trim();
       seen.add(cleanHref);
-      let text = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-      text = text.replace(/\s*(terakhir dibaca|last read).*$/i, "").trim();
-      let releaseTime = null;
-      const dmy = text.match(/\b(\d{1,2})\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+(\d{4})\b/i);
-      const mdy = text.match(/\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i);
-      if (dmy) {
-        const mo = months[dmy[2].slice(0,3).toLowerCase()];
-        if (mo !== undefined) releaseTime = new Date(Date.UTC(Number(dmy[3]), mo, Number(dmy[1]))).toISOString();
-        text = text.replace(dmy[0], "").trim();
-      } else if (mdy) {
-        const mo = months[mdy[1].slice(0,3).toLowerCase()];
-        if (mo !== undefined) releaseTime = new Date(Date.UTC(Number(mdy[3]), mo, Number(mdy[2]))).toISOString();
-        text = text.replace(mdy[0], "").trim();
-      }
-      text = text.replace(/[\s\-|•·]+$/g, "").trim();
       const slugTitle = parts[parts.length - 1] ? parts[parts.length - 1].replace(/-/g, " ") : "Chapter";
-      const name = text || slugTitle;
+      const name = rawTitle || slugTitle;
       chapters.push({
         name,
         path: cleanHref,
-        releaseTime,
+        releaseTime: null,
         chapterNumber: chapters.length + 1,
       });
       added++;
