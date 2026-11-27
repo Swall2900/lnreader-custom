@@ -5,7 +5,7 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.0.2";
+    this.version = "1.0.3";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
@@ -14,7 +14,6 @@ class MeioNovelCustom {
     const novels = [];
     const seen = new Set();
 
-    // Cari gambar cover berdasarkan alt="Cover ..."
     const coverMap = {};
     const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]+alt=["']Cover\s+([^"']+)["']/gi;
     let imgMatch;
@@ -22,7 +21,6 @@ class MeioNovelCustom {
       coverMap[imgMatch[2].trim().toLowerCase()] = imgMatch[1];
     }
 
-    // Cari link novel berpola https://meionovels.com/novel/<slug>/
     const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/([^\/"']+)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
 
@@ -70,11 +68,12 @@ class MeioNovelCustom {
     const titleMatch = body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     const name = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Untitled";
 
+    const ogImgMatch = body.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
     const coverMatch = body.match(/<img[^>]+src=["'](https:\/\/meionovels\.com\/wp-content\/uploads\/[^"']+)["']/i);
-    const cover = coverMatch ? coverMatch[1] : "";
+    const cover = ogImgMatch ? ogImgMatch[1] : (coverMatch ? coverMatch[1] : "");
 
-    const sumMatch = body.match(/<p[^>]+class=["'][^"']*leading-\[1\.75\][^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
-    const summary = sumMatch ? sumMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+    const descMatch = body.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+    const summary = descMatch ? descMatch[1].trim() : "";
 
     const novel = {
       path: cleanPath,
@@ -85,22 +84,69 @@ class MeioNovelCustom {
     };
 
     const slug = cleanPath.replace(/^novel\//, "").replace(/\/+$/, "");
-    const chapRegex = new RegExp(
-      `<a[^>]+href=["'](https:\\/\\/meionovels\\.com\\/novel\\/${slug}\\/[^"'#?]+)["'][^>]*>([\\s\\S]*?)<\\/a>`,
-      "gi"
-    );
-    let match;
     const seen = new Set();
 
-    while ((match = chapRegex.exec(body)) !== null) {
-      const chapUrl = match[1];
-      const chapName = match[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (chapName && !seen.has(chapUrl)) {
-        seen.add(chapUrl);
-        novel.chapters.push({
-          name: chapName,
-          path: chapUrl.replace(this.site, ""),
-        });
+    // 1. Cek endpoint API dinamis dari x-data="chapterList(...)"
+    let apiUrl = "";
+    const xDataMatch = body.match(/chapterList\(([\s\S]*?)\)/i);
+    if (xDataMatch) {
+      const decoded = xDataMatch[1].replace(/&quot;/g, '"').replace(/\\\//g, "/");
+      const urlInData = decoded.match(/https:\/\/meionovels\.com\/[^"'\s)]+/i);
+      if (urlInData) apiUrl = urlInData[0];
+    }
+    if (!apiUrl) {
+      apiUrl = `${this.site}novel/${slug}/chapters`;
+    }
+
+    try {
+      const apiRes = await fetch(apiUrl, {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      const apiText = await apiRes.text();
+      const jsonData = JSON.parse(apiText);
+      const list = Array.isArray(jsonData)
+        ? jsonData
+        : (jsonData.data || jsonData.chapters || jsonData.items || []);
+
+      for (const item of list) {
+        const rawUrl = item.url || item.link || (item.slug ? `${this.site}novel/${slug}/${item.slug}/` : "");
+        const chapTitle = item.title || item.name || item.chapter_title || "";
+        if (rawUrl && chapTitle && !seen.has(rawUrl)) {
+          seen.add(rawUrl);
+          novel.chapters.push({
+            name: String(chapTitle).trim(),
+            path: rawUrl.replace(this.site, ""),
+          });
+        }
+      }
+    } catch (e) {
+      // Lanjut ke fallback HTML jika endpoint JSON berbeda
+    }
+
+    // 2. Fallback: ekstrak link bab dari HTML halaman jika API belum mengembalikan daftar
+    if (novel.chapters.length === 0) {
+      const chapRegex = new RegExp(
+        `<a[^>]+href=["'](https:\\/\\/meionovels\\.com\\/novel\\/${slug}\\/[^"'#?]+)["'][^>]*>([\\s\\S]*?)<\\/a>`,
+        "gi"
+      );
+      let match;
+      while ((match = chapRegex.exec(body)) !== null) {
+        const chapUrl = match[1];
+        const chapName = match[2]
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (chapName && !seen.has(chapUrl)) {
+          seen.add(chapUrl);
+          novel.chapters.push({
+            name: chapName,
+            path: chapUrl.replace(this.site, ""),
+          });
+        }
       }
     }
 
@@ -113,7 +159,6 @@ class MeioNovelCustom {
     const result = await fetch(url);
     const body = await result.text();
 
-    // Hapus script, style, header, footer, dan nav sebelum mengambil isi cerita
     const cleaned = body
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -126,7 +171,6 @@ class MeioNovelCustom {
       return articleMatch[1];
     }
 
-    // Fallback: gabungkan seluruh paragraf <p> di dalam halaman bab
     const paragraphs = [];
     const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
     let pMatch;
