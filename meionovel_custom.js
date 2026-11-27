@@ -1,99 +1,115 @@
-const { fetchApi } = require("@libs/fetch");
-const { load: loadCheerio } = require("cheerio");
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
 
 class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.0.0";
+    this.version = "1.0.1";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
 
   async popularNovels(pageNo) {
     const url = `${this.site}novel/?page=${pageNo}`;
-    const result = await fetchApi(url);
+    const result = await fetch(url);
     const body = await result.text();
-    const $ = loadCheerio(body);
-
     const novels = [];
-    $("article, .novel-item, .bsx").each((i, el) => {
-      const name = $(el).find("h2, h3, .tt").text().trim();
-      const cover = $(el).find("img").attr("src");
-      const novelUrl = $(el).find("a").attr("href");
 
-      if (name && novelUrl) {
+    const regex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    const seen = new Set();
+
+    while ((match = regex.exec(body)) !== null) {
+      const novelUrl = match[1];
+      const innerHtml = match[2];
+      const titleMatch = innerHtml.match(/<h[1-4][^>]*>(.*?)<\/h[1-4]>/i) || innerHtml.match(/title=["']([^"']+)["']/i);
+      const imgMatch = innerHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
+      const name = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+
+      if (name && !seen.has(novelUrl)) {
+        seen.add(novelUrl);
         novels.push({
           name,
-          cover,
+          cover: imgMatch ? imgMatch[1] : "",
           path: novelUrl.replace(this.site, ""),
         });
       }
-    });
-
+    }
     return novels;
   }
 
   async parseNovel(novelPath) {
     const url = this.site + novelPath;
-    const result = await fetchApi(url);
+    const result = await fetch(url);
     const body = await result.text();
-    const $ = loadCheerio(body);
+
+    const titleMatch = body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    const name = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Untitled";
 
     const novel = {
       path: novelPath,
-      name: $("h1").first().text().trim() || "Untitled",
-      cover: $("img").first().attr("src"),
-      summary: $(".summary, .description, p").first().text().trim(),
+      name,
+      cover: "",
+      summary: "",
       chapters: [],
     };
 
-    $("a[href*='chapter']").each((i, el) => {
-      const chapterName = $(el).text().trim();
-      const chapterUrl = $(el).attr("href");
-      if (chapterName && chapterUrl) {
+    const chapRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/[^"']*chapter[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    const seen = new Set();
+
+    while ((match = chapRegex.exec(body)) !== null) {
+      const chapUrl = match[1];
+      const chapName = match[2].replace(/<[^>]+>/g, "").trim();
+      if (chapName && !seen.has(chapUrl)) {
+        seen.add(chapUrl);
         novel.chapters.push({
-          name: chapterName,
-          path: chapterUrl.replace(this.site, ""),
+          name: chapName,
+          path: chapUrl.replace(this.site, ""),
         });
       }
-    });
-
+    }
     return novel;
   }
 
   async parseChapter(chapterPath) {
     const url = this.site + chapterPath;
-    const result = await fetchApi(url);
+    const result = await fetch(url);
     const body = await result.text();
-    const $ = loadCheerio(body);
 
-    return $(".chapter-content, .entry-content, article").html() || "";
+    const contentMatch = body.match(/<div[^>]+class=["'][^"']*(?:chapter-content|entry-content|reading-content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+    return contentMatch ? contentMatch[1] : body;
   }
 
   async searchNovels(searchTerm) {
     const url = `${this.site}?s=${encodeURIComponent(searchTerm)}`;
-    const result = await fetchApi(url);
+    const result = await fetch(url);
     const body = await result.text();
-    const $ = loadCheerio(body);
-
     const novels = [];
-    $("article, .novel-item, .bsx").each((i, el) => {
-      const name = $(el).find("h2, h3, .tt").text().trim();
-      const cover = $(el).find("img").attr("src");
-      const novelUrl = $(el).find("a").attr("href");
 
-      if (name && novelUrl) {
+    const regex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    const seen = new Set();
+
+    while ((match = regex.exec(body)) !== null) {
+      const novelUrl = match[1];
+      const innerHtml = match[2];
+      const titleMatch = innerHtml.match(/<h[1-4][^>]*>(.*?)<\/h[1-4]>/i) || innerHtml.match(/title=["']([^"']+)["']/i);
+      const imgMatch = innerHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
+      const name = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+
+      if (name && !seen.has(novelUrl)) {
+        seen.add(novelUrl);
         novels.push({
           name,
-          cover,
+          cover: imgMatch ? imgMatch[1] : "",
           path: novelUrl.replace(this.site, ""),
         });
       }
-    });
-
+    }
     return novels;
   }
 }
 
-module.exports = new MeioNovelCustom();
+exports.default = new MeioNovelCustom();
