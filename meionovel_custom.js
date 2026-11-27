@@ -365,6 +365,32 @@ class MeioNovelCustom {
     return novel;
   }
 
+  _parseChaptersFromHtml(html, slug, seen, chapters) {
+    if (!html || !Array.isArray(chapters)) return 0;
+    let added = 0;
+    const linkRegex = /<a[^>]+href=["']([^"']*\/baca\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = linkRegex.exec(html)) !== null) {
+      const rawHref = this._decodeEntities(String(m[1] || "")).trim();
+      if (!rawHref) continue;
+      let cleanHref = rawHref.replace(/^https?:\/\/[^/]+/i, "");
+      if (!cleanHref.startsWith("/")) cleanHref = "/" + cleanHref;
+      cleanHref = cleanHref.replace(/^\/+/, "");
+      if (seen.has(cleanHref)) continue;
+      seen.add(cleanHref);
+      const rawTitle = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+      const name = rawTitle || cleanHref.split("/").filter(Boolean).pop() || "Chapter";
+      chapters.push({
+        name,
+        path: cleanHref,
+        releaseTime: null,
+        chapterNumber: chapters.length + 1,
+      });
+      added++;
+    }
+    return added;
+  }
+
   async parseChapter(chapterPath) {
     const cleanPath = chapterPath.replace(/^\/+/, "");
     const url = this.site + cleanPath;
