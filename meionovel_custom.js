@@ -382,7 +382,11 @@ class MeioNovelCustom {
       if (!isNovelChapter && !isReaderPath) continue;
       if (seen.has(cleanHref)) continue;
       seen.add(cleanHref);
-      const rawTitle = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+      let rawTitle = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+      rawTitle = rawTitle.replace(/\s*(terakhir dibaca|last read).*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b\d{1,2}\s+(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{4}\b.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b.*$/i, "").trim();
+      rawTitle = rawTitle.replace(/\s*\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b.*$/i, "").trim();
       const slugTitle = parts[parts.length - 1] ? parts[parts.length - 1].replace(/-/g, " ") : "Chapter";
       const name = rawTitle || slugTitle;
       chapters.push({
