@@ -5,7 +5,7 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.1.0";
+    this.version = "1.1.1";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
@@ -377,7 +377,7 @@ class MeioNovelCustom {
     return "<p>Token chapter tidak ditemukan di halaman.</p>";
   }
 
-  async searchNovels(searchTerm) {
+  async searchNovels(searchTerm, pageNo) { if (pageNo && pageNo > 1) return [];
     const url = `${this.site}jelajahi?q=${encodeURIComponent(searchTerm)}`;
     const result = await fetch(url);
     const body = await result.text();
