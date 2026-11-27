@@ -5,7 +5,7 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.2.1";
+    this.version = "1.2.2";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
@@ -167,100 +167,53 @@ class MeioNovelCustom {
   _extractNovels(body) {
     const novels = [];
     const seen = new Set();
-
+    const normalizeUrl = (u) => {
+      if (!u) return "";
+      const s = this._decodeEntities(String(u)).trim();
+      if (!s || s.startsWith("data:")) return "";
+      if (s.startsWith("//")) return "https:" + s;
+      if (s.startsWith("/")) return this.site.replace(/\/+$/, "") + s;
+      return s;
+    };
     const coverMap = {};
-    const imgRegex = /<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]+alt=["'](?:Cover\s+)?([^"']+)["']/gi;
+    const imgRegex = /<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["'][^>]*>/gi;
     let imgMatch;
     while ((imgMatch = imgRegex.exec(body)) !== null) {
-      const altKey = this._decodeEntities(imgMatch[2]).trim().toLowerCase();
-      if (altKey && !imgMatch[1].startsWith("data:")) {
-        coverMap[altKey] = imgMatch[1];
+      const fullImg = imgMatch[0];
+      const u = normalizeUrl(imgMatch[1]);
+      if (!u) continue;
+      const altM = fullImg.match(/alt=["']([^"']*)["']/i);
+      if (altM && altM[1]) {
+        const rawAlt = this._decodeEntities(altM[1]).replace(/^cover\s+/i, "").trim().toLowerCase();
+        if (rawAlt && !coverMap[rawAlt]) coverMap[rawAlt] = u;
       }
     }
-
-    const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/([^\/"']+)\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^\/"']+\/?)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let match;
-
     while ((match = linkRegex.exec(body)) !== null) {
       const novelUrl = match[1].endsWith("/") ? match[1] : match[1] + "/";
-      const innerHtml = match[3];
-      const cleanText = this._decodeEntities(innerHtml.replace(/<[^>]+>/g, " "))
-        .replace(/\s+/g, " ")
-        .trim();
-
-      if (
-        cleanText &&
-        cleanText.length > 1 &&
-        !/^(mulai baca|detail|baca|lihat semua|selengkapnya)$/i.test(cleanText) &&
-        !seen.has(novelUrl)
-      ) {
+      const innerHtml = match[2];
+      const cleanText = this._decodeEntities(innerHtml.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+      if (cleanText && cleanText.length > 1 && !/^(mulai baca|detail|baca|lihat semua|selengkapnya)$/i.test(cleanText) && !seen.has(novelUrl)) {
         seen.add(novelUrl);
-
         let cover = coverMap[cleanText.toLowerCase()] || "";
         if (!cover) {
-          const innerImg = innerHtml.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/i);
-          if (innerImg && !innerImg[1].startsWith("data:")) {
-            cover = innerImg[1];
-          }
+          const innerImg = innerHtml.match(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["']/i);
+          if (innerImg) cover = normalizeUrl(innerImg[1]);
         }
         if (!cover) {
-          const beforeSnippet = body.slice(Math.max(0, match.index - 900), match.index);
-          const prevImgs = [...beforeSnippet.matchAll(/<img[^>]+(?:src|data-src)=["'](https?:\/\/[^"']+)["']/gi)];
-          if (prevImgs.length > 0) {
-            cover = prevImgs[prevImgs.length - 1][1];
+          const nearby = body.slice(Math.max(0, match.index - 1000), Math.min(body.length, match.index + 600));
+          const nearImgs = [...nearby.matchAll(/<img[^>]+(?:src|data-src|data-lazy-src)=["']([^"']+)["'][^>]*>/gi)];
+          for (let i = nearImgs.length - 1; i >= 0; i--) {
+            const cand = normalizeUrl(nearImgs[i][1]);
+            if (cand && !/avatar|icon|logo|badge/i.test(cand)) { cover = cand; break; }
           }
         }
-
-        novels.push({
-          name: cleanText,
-          cover,
-          path: novelUrl.replace(this.site, ""),
-        });
+        novels.push({ name: cleanText, cover, path: novelUrl.replace(this.site, "") });
       }
     }
     return novels;
   }
-
-  _parseChaptersFromHtml(html, slug, seen, targetList) {
-    let added = 0;
-    const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-    let m;
-    while ((m = linkRegex.exec(html)) !== null) {
-      const linkUrl = m[1];
-      if (linkUrl.startsWith(`${this.site}novel/${slug}/`) && linkUrl !== `${this.site}novel/${slug}/`) {
-        const rawInner = m[2];
-        let releaseTime = "";
-        const dateMatch = rawInner.match(
-          /\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|Mei|May|Jun|Jul|Agu|Aug|Sep|Okt|Oct|Nov|Des|Dec)[a-z]*\s+\d{4})\b/i
-        );
-        if (dateMatch) {
-          releaseTime = dateMatch[1];
-        }
-
-        let chapName = this._decodeEntities(rawInner.replace(/<[^>]+>/g, " "))
-          .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-        if (releaseTime) {
-          chapName = chapName.replace(releaseTime, "").replace(/\s*[•|-]\s*$/, "").trim();
-        }
-
-        if (chapName && !seen.has(linkUrl)) {
-          seen.add(linkUrl);
-          const item = {
-            name: chapName,
-            path: linkUrl.replace(this.site, ""),
-          };
-          if (releaseTime) item.releaseTime = releaseTime;
-          targetList.push(item);
-          added++;
-        }
-      }
-    }
-    return added;
-  }
-
   async popularNovels(pageNo) {
     const page = pageNo || 1;
     const url = page > 1 ? `${this.site}jelajahi?page=${page}` : `${this.site}jelajahi`;
