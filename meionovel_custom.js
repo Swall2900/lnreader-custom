@@ -368,7 +368,7 @@ class MeioNovelCustom {
   _parseChaptersFromHtml(html, slug, seen, chapters) {
     if (!html || !Array.isArray(chapters)) return 0;
     let added = 0;
-    const linkRegex = /<a[^>]+href=["']([^"']*\/baca\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const linkRegex = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = linkRegex.exec(html)) !== null) {
       const rawHref = this._decodeEntities(String(m[1] || "")).trim();
@@ -376,10 +376,13 @@ class MeioNovelCustom {
       let cleanHref = rawHref.replace(/^https?:\/\/[^/]+/i, "");
       if (!cleanHref.startsWith("/")) cleanHref = "/" + cleanHref;
       cleanHref = cleanHref.replace(/^\/+/, "");
+      if (!cleanHref || /^(novel|jelajahi|genre|kategori|tag|ranking|library|pengumuman|login|register)(\/|$)/i.test(cleanHref)) continue;
+      if (!/(\/baca\/|\/chapter\/|\/bab\/|chapter-|bab-|ch-)/i.test(cleanHref)) continue;
       if (seen.has(cleanHref)) continue;
       seen.add(cleanHref);
       const rawTitle = this._decodeEntities(String(m[2] || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-      const name = rawTitle || cleanHref.split("/").filter(Boolean).pop() || "Chapter";
+      const fallbackNum = cleanHref.match(/(\d+)(?!.*\d)/);
+      const name = rawTitle || (fallbackNum ? "Chapter " + fallbackNum[1] : "Chapter");
       chapters.push({
         name,
         path: cleanHref,
