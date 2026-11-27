@@ -5,7 +5,7 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.0.8";
+    this.version = "1.0.9";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
   }
@@ -196,6 +196,31 @@ class MeioNovelCustom {
     return novels;
   }
 
+  _parseChaptersFromHtml(html, slug, seen, targetList) {
+    let added = 0;
+    const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = linkRegex.exec(html)) !== null) {
+      const linkUrl = m[1];
+      if (linkUrl.startsWith(`${this.site}novel/${slug}/`) && linkUrl !== `${this.site}novel/${slug}/`) {
+        const chapName = m[2]
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (chapName && !seen.has(linkUrl)) {
+          seen.add(linkUrl);
+          targetList.push({
+            name: chapName,
+            path: linkUrl.replace(this.site, ""),
+          });
+          added++;
+        }
+      }
+    }
+    return added;
+  }
+
   async popularNovels(pageNo) {
     const url = pageNo > 1 ? `${this.site}jelajahi?page=${pageNo}` : `${this.site}jelajahi`;
     const result = await fetch(url);
@@ -236,6 +261,7 @@ class MeioNovelCustom {
     };
 
     const slug = cleanPath.replace(/^novel\//, "").replace(/\/+$/, "");
+    const seen = new Set();
 
     let listUrl = `${this.site}baca/daftar`;
     let novelId = null;
@@ -243,51 +269,73 @@ class MeioNovelCustom {
 
     const clIdx = body.indexOf("chapterList(");
     if (clIdx !== -1) {
-      const clBlock = body.slice(clIdx, clIdx + 2000);
+      const clBlock = body.slice(clIdx, clIdx + 2500);
       listUrl = this._extractBlockField(clBlock, "url") || listUrl;
       novelId = Number(this._extractBlockField(clBlock, "novel")) || null;
       token = this._extractBlockField(clBlock, "token");
     }
 
-    let sourceHtmlForChapters = "";
-
     if (token && novelId) {
-      const apiRes = await this._postJson(
+      const firstRes = await this._postJson(
         listUrl,
         { novel: novelId, token, params: {} },
         csrf,
         cookie,
         url
       );
-      if (apiRes.data && apiRes.data.html) {
-        sourceHtmlForChapters = String(apiRes.data.html);
-      }
-    }
+      const firstHtml = firstRes.data && firstRes.data.html ? String(firstRes.data.html) : "";
 
-    if (!sourceHtmlForChapters) {
-      sourceHtmlForChapters = body;
-    }
+      if (firstHtml) {
+        this._parseChaptersFromHtml(firstHtml, slug, seen, novel.chapters);
 
-    // Parse semua link bab yang ada di HTML daftar bab (termasuk yang ada di dalam volume tertutup)
-    const seen = new Set();
-    const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-    let m;
-    while ((m = linkRegex.exec(sourceHtmlForChapters)) !== null) {
-      const linkUrl = m[1];
-      if (linkUrl.startsWith(`${this.site}novel/${slug}/`) && linkUrl !== `${this.site}novel/${slug}/`) {
-        const chapName = m[2]
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (chapName && !seen.has(linkUrl)) {
-          seen.add(linkUrl);
-          novel.chapters.push({
-            name: chapName,
-            path: linkUrl.replace(this.site, ""),
-          });
+        // Deteksi parameter jalur/tab (misal Web Novel / Light Novel)
+        const jalurMatches = [...firstHtml.matchAll(/[?&]jalur=([^"'&\s#]+)/gi)].map((x) =>
+          decodeURIComponent(x[1])
+        );
+        const uniqueJalurs = [...new Set(jalurMatches)];
+
+        // Deteksi jumlah halaman pagination (?page=2, ?page=3, ...)
+        let maxPage = 1;
+        const pageMatches = firstHtml.matchAll(/[?&]page=(\d+)/gi);
+        for (const pm of pageMatches) {
+          const pNum = Number(pm[1]);
+          if (pNum > maxPage && pNum <= 100) maxPage = pNum;
+        }
+
+        // Ambil halaman berikutnya (page 2..maxPage)
+        for (let p = 2; p <= maxPage; p++) {
+          const pageRes = await this._postJson(
+            listUrl,
+            { novel: novelId, token, params: { page: String(p) } },
+            csrf,
+            cookie,
+            url
+          );
+          const pHtml = pageRes.data && pageRes.data.html ? String(pageRes.data.html) : "";
+          if (!pHtml) break;
+          const added = this._parseChaptersFromHtml(pHtml, slug, seen, novel.chapters);
+          if (added === 0) break;
+        }
+
+        // Ambil tab jalur lain jika tersedia
+        for (const jVal of uniqueJalurs) {
+          const jRes = await this._postJson(
+            listUrl,
+            { novel: novelId, token, params: { jalur: jVal } },
+            csrf,
+            cookie,
+            url
+          );
+          const jHtml = jRes.data && jRes.data.html ? String(jRes.data.html) : "";
+          if (jHtml) {
+            this._parseChaptersFromHtml(jHtml, slug, seen, novel.chapters);
+          }
         }
       }
+    }
+
+    if (novel.chapters.length === 0) {
+      this._parseChaptersFromHtml(body, slug, seen, novel.chapters);
     }
 
     return novel;
