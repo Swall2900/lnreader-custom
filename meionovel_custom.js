@@ -5,9 +5,17 @@ class MeioNovelCustom {
   constructor() {
     this.id = "meionovel-custom";
     this.name = "MeioNovel (Custom)";
-    this.version = "1.0.7";
+    this.version = "1.0.8";
     this.icon = "src/id/meionovel/icon.png";
     this.site = "https://meionovels.com/";
+  }
+
+  _decodeEntities(str) {
+    return String(str)
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;|&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/\\\//g, "/");
   }
 
   _b64ToBytes(b64) {
@@ -122,13 +130,11 @@ class MeioNovelCustom {
   }
 
   _extractBlockField(block, key) {
-    const idx = block.indexOf(key + ":");
-    if (idx === -1) return "";
-    const sub = block.slice(idx + key.length + 1, idx + key.length + 700);
-    const strMatch = sub.match(/^\s*['"]([^'"]+)['"]/);
-    if (strMatch) return strMatch[1].replace(/\\\//g, "/");
-    const numMatch = sub.match(/^\s*(\d+)/);
-    return numMatch ? numMatch[1] : "";
+    const decoded = this._decodeEntities(block);
+    const regex = new RegExp(`["']?${key}["']?\\s*:\\s*(?:["']([^"']+)["']|(\\d+))`, "i");
+    const match = decoded.match(regex);
+    if (!match) return "";
+    return match[1] !== undefined ? match[1] : match[2];
   }
 
   async _postJson(endpoint, payload, csrf, cookie, referer) {
@@ -209,7 +215,7 @@ class MeioNovelCustom {
     const url = this.site + cleanPath;
     const result = await fetch(url);
     const body = await result.text();
-    let { csrf, cookie } = this._extractSession(result, body);
+    const { csrf, cookie } = this._extractSession(result, body);
 
     const titleMatch = body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     const name = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Untitled";
@@ -231,18 +237,19 @@ class MeioNovelCustom {
 
     const slug = cleanPath.replace(/^novel\//, "").replace(/\/+$/, "");
 
-    // Ambil blok konfigurasi chapterList({ ... }) milik halaman detail novel (fungsi ma)
     let listUrl = `${this.site}baca/daftar`;
     let novelId = null;
     let token = "";
 
     const clIdx = body.indexOf("chapterList(");
     if (clIdx !== -1) {
-      const clBlock = body.slice(clIdx, clIdx + 1500);
+      const clBlock = body.slice(clIdx, clIdx + 2000);
       listUrl = this._extractBlockField(clBlock, "url") || listUrl;
       novelId = Number(this._extractBlockField(clBlock, "novel")) || null;
       token = this._extractBlockField(clBlock, "token");
     }
+
+    let sourceHtmlForChapters = "";
 
     if (token && novelId) {
       const apiRes = await this._postJson(
@@ -252,46 +259,33 @@ class MeioNovelCustom {
         cookie,
         url
       );
-      const tocHtml = apiRes.data && apiRes.data.html ? String(apiRes.data.html) : "";
-
-      if (tocHtml) {
-        const tocLinkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-        const tocSeen = new Set();
-        let tm;
-        while ((tm = tocLinkRegex.exec(tocHtml)) !== null) {
-          const cUrl = tm[1];
-          const cName = tm[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          if (cName && !tocSeen.has(cUrl)) {
-            tocSeen.add(cUrl);
-            novel.chapters.push({
-              name: cName,
-              path: cUrl.replace(this.site, ""),
-            });
-          }
-        }
+      if (apiRes.data && apiRes.data.html) {
+        sourceHtmlForChapters = String(apiRes.data.html);
       }
     }
 
-    // Fallback jika daftar belum terisi
-    if (novel.chapters.length === 0) {
-      const seen = new Set();
-      const allLinksRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-      let m;
-      while ((m = allLinksRegex.exec(body)) !== null) {
-        const linkUrl = m[1];
-        if (linkUrl.startsWith(`${this.site}novel/${slug}/`) && linkUrl !== `${this.site}novel/${slug}/`) {
-          const chapName = m[2]
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
-            .replace(/\s+/g, " ")
-            .trim();
-          if (chapName && !seen.has(linkUrl)) {
-            seen.add(linkUrl);
-            novel.chapters.push({
-              name: chapName,
-              path: linkUrl.replace(this.site, ""),
-            });
-          }
+    if (!sourceHtmlForChapters) {
+      sourceHtmlForChapters = body;
+    }
+
+    // Parse semua link bab yang ada di HTML daftar bab (termasuk yang ada di dalam volume tertutup)
+    const seen = new Set();
+    const linkRegex = /<a[^>]+href=["'](https:\/\/meionovels\.com\/novel\/[^"'#?]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = linkRegex.exec(sourceHtmlForChapters)) !== null) {
+      const linkUrl = m[1];
+      if (linkUrl.startsWith(`${this.site}novel/${slug}/`) && linkUrl !== `${this.site}novel/${slug}/`) {
+        const chapName = m[2]
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&#xFE0E;|▶|Mulai Baca\s*[—-]\s*/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (chapName && !seen.has(linkUrl)) {
+          seen.add(linkUrl);
+          novel.chapters.push({
+            name: chapName,
+            path: linkUrl.replace(this.site, ""),
+          });
         }
       }
     }
@@ -307,7 +301,7 @@ class MeioNovelCustom {
     const { csrf, cookie } = this._extractSession(result, body);
 
     const readerIdx = body.indexOf("reader(");
-    const readerBlock = readerIdx !== -1 ? body.slice(readerIdx, readerIdx + 2000) : body;
+    const readerBlock = readerIdx !== -1 ? body.slice(readerIdx, readerIdx + 2500) : body;
 
     const contentUrl = this._extractBlockField(readerBlock, "contentUrl") || `${this.site}baca/isi`;
     const contentToken = this._extractBlockField(readerBlock, "contentToken");
